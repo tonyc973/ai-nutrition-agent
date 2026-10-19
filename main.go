@@ -22,20 +22,36 @@ type message struct {
 
 func main() {
 	loadDotEnv(".env")
-	for _, k := range []string{"OPENAI_API_KEY", "SPOONACULAR_API_KEY"} {
+	for _, k := range []string{"OPENAI_API_KEY", "SPOONACULAR_API_KEY", "JWT_SECRET"} {
 		if os.Getenv(k) == "" {
 			log.Fatalf("missing %s (put it in the .env file)", k)
 		}
 	}
-	site, _ := fs.Sub(static, "static")
-	http.Handle("/", http.FileServerFS(site))
-	http.HandleFunc("POST /api/chat", handleChat)
+	if len(os.Getenv("JWT_SECRET")) < 32 {
+		log.Fatal("JWT_SECRET must be at least 32 characters (generate one with: openssl rand -hex 32)")
+	}
+	if err := loadUsers(); err != nil {
+		log.Fatalf("reading %s: %v", usersFile, err)
+	}
 	port := cmp.Or(os.Getenv("PORT"), "8090")
 	log.Println("App running at http://localhost:" + port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, routes()))
 }
 
-func handleChat(w http.ResponseWriter, r *http.Request) {
+func routes() *http.ServeMux {
+	site, _ := fs.Sub(static, "static")
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServerFS(site))
+	mux.HandleFunc("POST /api/register", handleRegister)
+	mux.HandleFunc("POST /api/login", handleLogin)
+	mux.HandleFunc("POST /api/logout", handleLogout)
+	mux.HandleFunc("GET /api/me", requireUser(handleMe))
+	mux.HandleFunc("PUT /api/profile", requireUser(handleSaveProfile))
+	mux.HandleFunc("POST /api/chat", requireUser(handleChat)) // logged-in only, so strangers can't spend the API keys
+	return mux
+}
+
+func handleChat(w http.ResponseWriter, r *http.Request, _ string) {
 	var req struct {
 		Messages []message `json:"messages"`
 	}
@@ -56,8 +72,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"plan": p, "steps": steps})
+	writeJSON(w, map[string]any{"plan": p, "steps": steps})
 }
 
 // loadDotEnv sets KEY=VALUE lines from path; real environment variables win.

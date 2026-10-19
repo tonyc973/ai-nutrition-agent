@@ -120,6 +120,22 @@ details.panel { padding: 14px 20px; }
 summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 ol.steps { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 8px; }
 ol.steps code { display: block; font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+[hidden] { display: none !important; }
+.user { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; text-transform: uppercase; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 700; cursor: pointer; }
+.link:hover { text-decoration: underline; }
+.btn.ghost { background: var(--accent-soft); color: var(--accent); }
+.actions { display: grid; grid-template-columns: auto 1fr; gap: 10px; }
+.status { font-size: 13px; font-weight: 600; color: var(--accent); text-align: center; margin: -6px 0 0; min-height: 1.2em; }
+.auth { max-width: 420px; margin: 32px auto; padding: 0 16px; }
+.auth form { padding: 28px; display: grid; gap: 16px; }
+.auth h2 { font-size: 24px; }
+.auth p { margin: -8px 0 0; color: var(--muted); font-size: 14px; }
+.auth input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.form-error { color: var(--fat); font-size: 13px; font-weight: 600; }
+.form-error:empty { display: none; }
+.auth .switch { text-align: center; margin: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
@@ -129,9 +145,25 @@ ol.steps code { display: block; font-size: 12px; color: var(--muted); white-spac
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>
   </div>
   <div><h1>Nutri Agent</h1><p>Personalized meal plans, built by an AI agent</p></div>
+  <div class="user" id="user" hidden>
+    <span class="avatar" id="avatar" aria-hidden="true"></span><span id="uname"></span>
+    <button class="link" id="logout" type="button">Log out</button>
+  </div>
 </header>
 
-<main>
+<section class="auth" id="auth" hidden>
+  <form class="panel" id="auth-form">
+    <h2 id="auth-title">Welcome back</h2>
+    <p id="auth-sub">Log in to load your saved profile.</p>
+    <div><label for="username">Username</label><input id="username" autocomplete="username" required minlength="3" maxlength="32"></div>
+    <div><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></div>
+    <div class="form-error" id="auth-error" role="alert"></div>
+    <button class="btn" id="auth-btn">Log in</button>
+    <p class="switch"><span id="switch-text">New here?</span> <button class="link" id="switch" type="button">Create an account</button></p>
+  </form>
+</section>
+
+<main id="app" hidden>
   <form id="profile" class="panel">
     <h2>Your profile</h2>
     <div>
@@ -194,7 +226,11 @@ ol.steps code { display: block; font-size: 12px; color: var(--muted); white-spac
       <label for="notes">Preferences (optional)</label>
       <textarea id="notes" name="notes" maxlength="500" placeholder="e.g. I love chicken, no mushrooms, max 30 minutes of cooking"></textarea>
     </div>
-    <button class="btn" type="submit">Generate my plan</button>
+    <div class="actions">
+      <button class="btn ghost" id="save" type="button">Save profile</button>
+      <button class="btn" type="submit">Generate my plan</button>
+    </div>
+    <p class="status" id="status" role="status"></p>
   </form>
 
   <section id="out" aria-live="polite">
@@ -220,15 +256,100 @@ let last; // last good result, re-shown if a follow-up fails
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const safeUrl = u => /^https?:\/\//.test(u || '') ? u : '#';
 const toolNames = { calculate_targets: 'Calculate targets', search_recipes: 'Search recipes', review_plan: 'Check plan' };
+const $ = id => document.getElementById(id);
 
+async function api(method, path, body) {
+  const res = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+  if (!res.ok) {
+    if (res.status === 401 && path !== '/api/login') showAuth(); // session gone, e.g. after a server restart
+    throw new Error((await res.text()).trim());
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// --- Account ---
+let mode = 'login';
+
+function showAuth() {
+  $('app').hidden = $('user').hidden = true;
+  $('auth').hidden = false;
+  $('username').focus();
+}
+
+function showApp(me) {
+  $('auth').hidden = true;
+  $('app').hidden = $('user').hidden = false;
+  $('uname').textContent = me.username;
+  $('avatar').textContent = me.username[0];
+  if (me.profile) fillProfile(me.profile);
+}
+
+$('auth-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('auth-error').textContent = '';
+  $('auth-btn').disabled = true;
+  try {
+    showApp(await api('POST', `/api/${mode}`, { username: $('username').value.trim(), password: $('password').value }));
+    $('password').value = '';
+  } catch (err) {
+    $('auth-error').textContent = err.message;
+  } finally {
+    $('auth-btn').disabled = false;
+  }
+});
+
+$('switch').addEventListener('click', () => {
+  mode = mode === 'login' ? 'register' : 'login';
+  const reg = mode === 'register';
+  $('auth-title').textContent = reg ? 'Create your account' : 'Welcome back';
+  $('auth-sub').textContent = reg ? 'Your profile is saved, so it is ready next time you log in.' : 'Log in to load your saved profile.';
+  $('auth-btn').textContent = reg ? 'Create account' : 'Log in';
+  $('switch-text').textContent = reg ? 'Already have an account?' : 'New here?';
+  $('switch').textContent = reg ? 'Log in' : 'Create an account';
+  $('password').autocomplete = reg ? 'new-password' : 'current-password';
+  $('auth-error').textContent = '';
+});
+
+$('logout').addEventListener('click', async () => {
+  await api('POST', '/api/logout').catch(() => {});
+  location.reload(); // simplest way to clear the plan and conversation
+});
+
+api('GET', '/api/me').then(showApp).catch(() => {});
+
+// --- Profile ---
+function readProfile() {
+  const f = new FormData(form);
+  return { sex: f.get('sex'), age: +f.get('age'), weight: +f.get('weight'), height: +f.get('height'), activity: f.get('activity'),
+    goal: f.get('goal'), diet: f.get('diet'), intolerances: f.getAll('int'), notes: f.get('notes').trim() };
+}
+
+function fillProfile(p) {
+  const el = form.elements;
+  for (const k of ['sex', 'age', 'weight', 'height', 'activity', 'goal', 'diet', 'notes']) el[k].value = p[k];
+  form.querySelectorAll('[name=int]').forEach(c => c.checked = (p.intolerances || []).includes(c.value));
+}
+
+let statusTimer;
+function showStatus(text) {
+  $('status').textContent = text;
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => $('status').textContent = '', 3000);
+}
+
+const saveProfile = p => api('PUT', '/api/profile', p).then(() => showStatus('Profile saved ✓'), err => showStatus(err.message));
+
+$('save').addEventListener('click', () => form.reportValidity() && saveProfile(readProfile()));
+
+// --- Plan ---
 form.addEventListener('submit', e => {
   e.preventDefault();
-  const f = new FormData(form);
-  const ints = f.getAll('int');
-  const text = `My profile: sex=${f.get('sex')}, age=${f.get('age')}, weight=${f.get('weight')} kg, ` +
-    `height=${f.get('height')} cm, activity=${f.get('activity')}, goal=${f.get('goal')}. ` +
-    `Diet: ${f.get('diet') || 'no restrictions'}. Intolerances: ${ints.length ? ints.join(', ') : 'none'}. ` +
-    `Preferences: ${f.get('notes').trim() || 'none'}. Make me a plan for one day.`;
+  const p = readProfile();
+  saveProfile(p); // generating a plan also remembers the profile
+  const text = `My profile: sex=${p.sex}, age=${p.age}, weight=${p.weight} kg, ` +
+    `height=${p.height} cm, activity=${p.activity}, goal=${p.goal}. ` +
+    `Diet: ${p.diet || 'no restrictions'}. Intolerances: ${p.intolerances.length ? p.intolerances.join(', ') : 'none'}. ` +
+    `Preferences: ${p.notes || 'none'}. Make me a plan for one day.`;
   history = [];
   send(text);
 });
@@ -237,9 +358,7 @@ async function send(text) {
   const msgs = [...history, { role: 'user', content: text }];
   setBusy(true);
   try {
-    const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: msgs }) });
-    if (!res.ok) throw new Error(await res.text());
-    const { plan, steps } = await res.json();
+    const { plan, steps } = await api('POST', '/api/chat', { messages: msgs });
     const memo = { message: plan.message, targets: plan.targets, meals: plan.meals.map(m => ({ meal: m.meal, recipe_id: m.recipe_id, title: m.recipe.title })) };
     history = [...msgs, { role: 'assistant', content: JSON.stringify(memo) }];
     last = [plan, steps];

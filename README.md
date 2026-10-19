@@ -19,6 +19,7 @@ The backend is written in **Go with zero external dependencies**. The "brain" is
   - [Calorie and macro formula](#calorie-and-macro-formula)
   - [The final plan](#the-final-plan)
   - [Guardrails](#guardrails)
+- [Accounts and JWT login](#accounts-and-jwt-login)
 - [HTTP API](#http-api)
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
@@ -32,6 +33,7 @@ The backend is written in **Go with zero external dependencies**. The "brain" is
 
 ## Features
 
+- **Accounts:** sign up and log in. Each user has a saved profile that is filled in automatically next time. Login uses a **JWT** in an HttpOnly cookie, and passwords are hashed with PBKDF2-SHA256.
 - **Personal targets:** BMI, basal metabolic rate, daily calories and protein/carbs/fat targets, computed in Go (Mifflin-St Jeor) rather than guessed by the LLM.
 - **Real recipes:** every meal comes from Spoonacular, with its photo, calories, macros, cooking time and a link to the full recipe.
 - **Diet and allergies:** vegetarian, vegan, pescetarian, ketogenic, gluten free and paleo diets. Intolerances (dairy, eggs, gluten, peanuts, tree nuts, fish, shellfish, soy, sesame) are sent with every search.
@@ -44,14 +46,22 @@ The backend is written in **Go with zero external dependencies**. The "brain" is
 
 ## Screenshots
 
-| Start screen | Agent working |
+| Log in | Create an account |
 |---|---|
-| ![Start screen](docs/images/home.png) | ![Loading state](docs/images/loading.png) |
+| ![Login screen](docs/images/login.png) | ![Sign-up screen](docs/images/register.png) |
 
-| Generated plan (dark mode) | Tool calls made by the agent |
+| Saved profile (logged in as *maria*) | Agent working |
 |---|---|
-| ![Plan in dark mode](docs/images/plan-dark.png) | ![Agent steps](docs/images/agent-steps.png) |
+| ![Saved profile](docs/images/profile-saved.png) | ![Loading state](docs/images/loading.png) |
 
+| Start screen | Generated plan (dark mode) |
+|---|---|
+| ![Start screen](docs/images/home.png) | ![Plan in dark mode](docs/images/plan-dark.png) |
+
+| Tool calls made by the agent | Mobile: log in |
+|---|---|
+| ![Agent steps](docs/images/agent-steps.png) | <img src="docs/images/mobile-login.png" width="300" alt="Mobile login"> |
+|---|---|
 | Mobile: profile | Mobile: plan |
 |---|---|
 | <img src="docs/images/mobile-form.png" width="300" alt="Mobile profile form"> | <img src="docs/images/mobile-plan.png" width="300" alt="Mobile plan"> |
@@ -198,17 +208,75 @@ The model only chooses **IDs** and writes the explanations. `finalPlan` then loo
 | Endless loop | At most 10 model calls per request |
 | Burning the Spoonacular quota | At most 6 searches per request; an identical search is served from an in-memory cache for free |
 | Model keeps calling tools after the limit | Once searches or steps run out, the request is sent with `tool_choice: "none"`, which forces a final answer |
+| Strangers spending your API keys | `/api/chat` requires a logged-in user |
 | Browser injecting a system prompt | `/api/chat` accepts only `user` and `assistant` roles and bodies up to 64 KB |
 | HTML injection from recipe titles or model text | The UI escapes every value and only allows `http(s)` links |
-| Secrets in git | Keys live in `.env`, which is in `.gitignore` |
+| Secrets in git | Keys and `data/` (user accounts) are in `.gitignore` |
+
+---
+
+## Accounts and JWT login
+
+Everything is built with the Go standard library, in [`auth.go`](auth.go) and [`jwt.go`](jwt.go).
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant G as Go backend
+    participant F as data/users.json
+    B->>G: POST /api/register {username, password}
+    G->>G: salt = 16 random bytes<br/>hash = PBKDF2-SHA256(password, salt, 600 000 iterations)
+    G->>F: save {salt, hash} (temp file + rename)
+    G-->>B: Set-Cookie: token=JWT (HttpOnly, SameSite=Lax, 7 days)
+    B->>G: GET /api/me (cookie sent automatically)
+    G->>G: verify JWT signature + expiry → username
+    G-->>B: {username, profile}
+    B->>G: PUT /api/profile {sex, age, weight, …}
+    G->>F: save profile
+```
+
+**Passwords** are never stored. Each user gets a random 16-byte salt and a PBKDF2-SHA256 hash with 600,000 iterations, OWASP's recommendation for this algorithm. Login compares hashes in constant time (`subtle.ConstantTimeCompare`), so response timing reveals nothing about the hash.
+
+**The JWT** has the standard three base64url parts:
+
+```
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 . eyJzdWIiOiJtYXJpYSIsImV4cCI6MTc2MTUwMDAwMH0 . <signature>
+{"alg":"HS256","typ":"JWT"}             {"sub":"maria","exp":1761500000}            HMAC-SHA256(header.payload, JWT_SECRET)
+```
+
+- `signToken` builds it. `verifyToken` recomputes the signature, compares it in constant time (`hmac.Equal`) and checks `exp`.
+- The header must equal the one constant HS256 header we issue. This rejects tokens that claim another algorithm, including the classic `"alg": "none"` attack.
+- The token lives in an **HttpOnly cookie**, so page JavaScript (and any injected script) cannot read it. `SameSite=Lax` stops other sites from sending it with their POST requests (CSRF).
+- The server is **stateless**: no session table. Any server holding `JWT_SECRET` can verify the token, and a restart doesn't log anyone out.
+- `requireUser` wraps the protected routes. It verifies the token and also checks that the user still exists.
+
+**Validation:** usernames are 3–32 characters (letters, digits, `.`, `_`, `-`) and passwords 8–128 characters. Request bodies are size-limited, and the profile notes are capped at 500 characters.
+
+**Storage:** users and profiles are kept in `data/users.json`. The file is created on first sign-up with `0600` permissions and written atomically (temp file, then rename), so a crash can't corrupt it.
 
 ---
 
 ## HTTP API
 
+| Method | Path | Auth | Body | Response |
+|---|---|---|---|---|
+| `POST` | `/api/register` | – | `{"username","password"}` | `200 {username, profile: null}` + JWT cookie · `400` invalid · `409` taken |
+| `POST` | `/api/login` | – | `{"username","password"}` | `200 {username, profile}` + JWT cookie · `401` wrong credentials |
+| `POST` | `/api/logout` | – | – | `204`, deletes the cookie |
+| `GET` | `/api/me` | JWT | – | `200 {username, profile}` · `401` |
+| `PUT` | `/api/profile` | JWT | profile object (below) | `200` saved profile · `400` invalid |
+| `POST` | `/api/chat` | JWT | `{"messages": […]}` | `200 {plan, steps}` · `401` · `502` |
+
+Profile object:
+
+```json
+{ "sex": "male", "age": 24, "weight": 78, "height": 180, "activity": "active",
+  "goal": "gain", "diet": "", "intolerances": ["dairy", "peanut"], "notes": "I love chicken" }
+```
+
 ### `POST /api/chat`
 
-Request: the whole conversation (the server keeps no session state).
+Request: the whole conversation (the server keeps no conversation state).
 
 ```json
 {
@@ -255,6 +323,7 @@ Errors return a plain-text body:
 | Status | When |
 |---|---|
 | `400` | invalid JSON, empty `messages`, or a role other than `user`/`assistant` |
+| `401` | not logged in, or the token is invalid or expired |
 | `502` | OpenAI or the agent failed, e.g. an invalid key, no credits, or the step limit was reached. The upstream message is included and shown in the UI |
 
 ---
@@ -263,13 +332,17 @@ Errors return a plain-text body:
 
 ```
 ai-nutrition-agent/
-├── main.go             HTTP server, .env loader, request validation
+├── main.go             HTTP server, routes, .env loader, chat request validation
+├── auth.go             sign-up, login, logout, profiles, password hashing, users file
+├── jwt.go              JWT (HS256) signing and verification
 ├── agent.go            agent loop, system prompt, plan schema, OpenAI call, plan check
 ├── tools.go            tool definitions, calorie formula, Spoonacular search, caches
-├── agent_test.go       tests (no API keys needed)
+├── agent_test.go       agent and formula tests (no API keys needed)
+├── auth_test.go        sign-up/login/profile flow and JWT attack tests
 ├── static/
 │   └── index.html      the whole UI: HTML + CSS + vanilla JS, embedded in the binary
 ├── docs/images/        screenshots used in this README
+├── data/users.json     created at runtime: accounts and profiles (git-ignored)
 ├── .env.example        template for your keys
 └── go.mod              Go module, no dependencies
 ```
@@ -282,7 +355,7 @@ The UI is embedded in the Go binary with `//go:embed`, so the compiled program i
 
 ### 1. Requirements
 
-- **Go 1.22 or newer** ([install](https://go.dev/doc/install))
+- **Go 1.24 or newer** (for `crypto/pbkdf2` in the standard library) ([install](https://go.dev/doc/install))
 - An **OpenAI API key** with credits ([platform.openai.com](https://platform.openai.com/api-keys))
 - A free **Spoonacular API key** ([spoonacular.com/food-api/console](https://spoonacular.com/food-api/console#Dashboard))
 
@@ -292,7 +365,7 @@ The UI is embedded in the Go binary with `//go:embed`, so the compiled program i
 git clone https://github.com/tonyc973/ai-nutrition-agent.git
 cd ai-nutrition-agent
 cp .env.example .env
-# edit .env and paste both keys
+# edit .env: paste both API keys and set JWT_SECRET (openssl rand -hex 32)
 ```
 
 ### 3. Run
@@ -301,7 +374,7 @@ cp .env.example .env
 go run .
 ```
 
-Open **http://localhost:8090**.
+Open **http://localhost:8090**, create an account and fill in your profile.
 
 To build a single binary instead:
 
@@ -319,10 +392,11 @@ Set these in `.env` or as environment variables. Real environment variables take
 |---|---|---|---|
 | `OPENAI_API_KEY` | yes | | OpenAI key |
 | `SPOONACULAR_API_KEY` | yes | | Spoonacular key |
+| `JWT_SECRET` | yes | | Secret for signing login tokens, at least 32 characters. Changing it logs everyone out |
 | `OPENAI_MODEL` | no | `gpt-4o-mini` | Any Chat Completions model that supports tools and structured outputs |
 | `PORT` | no | `8090` | HTTP port |
 
-The server refuses to start if either key is missing.
+The server refuses to start if a required variable is missing.
 
 ## Tests
 
@@ -336,6 +410,8 @@ The tests use local fake servers (`httptest`) in place of OpenAI and Spoonacular
 |---|---|
 | `TestCalcTargets` | Formula values for a known man, the 1200 kcal floor for a small woman, rejection of unrealistic input |
 | `TestRunAgent` | The full loop: the model calls a tool, the tool result goes back to the model, an invented recipe ID is dropped, and a bad plan gets exactly one correction round |
+| `TestAuthFlow` | Chat refuses anonymous users; short passwords and duplicate usernames are rejected; a profile survives logout, login and a reload from disk; wrong passwords fail; only a 64-character hash is stored |
+| `TestJWT` | A valid token round-trips. Rejected: a changed payload (`"sub":"admin"`), `"alg":"none"`, garbage, an expired token, and a token signed with another secret |
 | `TestSearchCap` | The 7th search in one request never reaches Spoonacular, and the model is then forced to answer (`tool_choice: "none"`) |
 
 ---
@@ -351,7 +427,10 @@ The tests use local fake servers (`httptest`) in place of OpenAI and Spoonacular
 - **Not medical advice.** The formula estimates needs for healthy adults. It does not cover pregnancy, medical conditions or athletes with special needs.
 - **Allergies are enforced through the model.** The prompt and required parameters make the model pass intolerances, and Spoonacular filters on them, but a production app should also enforce them in code and show warnings.
 - **In-memory caches** grow with every search and reset when the server restarts. That's fine for a demo; a real deployment would use a database or an LRU cache.
-- **No accounts or saved history.** The conversation lives in the browser tab.
+- **Logout is client-side.** JWTs are stateless, so logging out deletes the cookie, but a copied token stays valid until it expires (7 days). Real revocation needs a token blocklist or short-lived tokens with refresh tokens.
+- **No rate limiting** on login. A public deployment should limit attempts per IP, and should serve over HTTPS so the cookie can be marked `Secure`.
+- **One JSON file for users.** Fine for a demo or a class; use a database (e.g. SQLite or PostgreSQL) for real traffic.
+- **Plans aren't saved.** The profile is saved, but the plan and conversation live in the browser tab.
 - **Recipes are in English**, as returned by Spoonacular. Nutrition values are per serving, as Spoonacular reports them.
 - **Macro balance:** the agent optimizes for total calories, so individual macros (e.g. fat) can land above or below target. The UI bars show this openly.
 
