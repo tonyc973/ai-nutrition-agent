@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutri Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f1e9; --panel: #fffdf9; --ink: #1d2a22; --muted: #6b7568; --line: #e6dfd2;
+  --accent: #2f6b4f; --accent-ink: #fff; --accent-soft: #e3efe7;
+  --warm: #d9643a; --protein: #2f6b4f; --carbs: #d39b2a; --fat: #c4573a;
+  --shadow: 0 1px 2px rgba(29,42,34,.05), 0 8px 24px rgba(29,42,34,.06);
+  --radius: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131815; --panel: #1b221d; --ink: #edf0ea; --muted: #9aa597; --line: #2b352e;
+    --accent: #6fbf94; --accent-ink: #0f1a13; --accent-soft: #223429;
+    --warm: #f0875f; --protein: #6fbf94; --carbs: #e8b955; --fat: #ec8a6c;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 Manrope, system-ui, sans-serif; }
+h1, h2, h3 { font-family: Fraunces, Georgia, serif; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+header { max-width: 1240px; margin: 0 auto; padding: 28px 24px 8px; display: flex; align-items: center; gap: 14px; }
+.logo { width: 42px; height: 42px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; }
+header h1 { font-size: 24px; }
+header p { margin: 0; color: var(--muted); font-size: 14px; }
+
+main { max-width: 1240px; margin: 0 auto; padding: 16px 24px 48px; display: grid; grid-template-columns: 360px 1fr; gap: 28px; align-items: start; }
+@media (max-width: 920px) { main { grid-template-columns: 1fr; padding: 12px 16px 40px; } header { padding: 20px 16px 4px; } }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+#profile { padding: 22px; position: sticky; top: 20px; display: grid; gap: 16px; }
+@media (max-width: 920px) { #profile { position: static; } }
+#profile h2 { font-size: 19px; }
+label, .label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+input[type=number], select, textarea, .ask input {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); transition: border-color .15s;
+}
+input:hover, select:hover, textarea:hover { border-color: var(--muted); }
+textarea { resize: vertical; min-height: 64px; }
+
+.seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 3px; }
+.seg label { flex: 1; margin: 0; }
+.seg input, .chips input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; text-align: center; padding: 7px 4px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); transition: .15s; }
+.seg input:checked + span { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+.seg input:focus-visible + span, .chips input:focus-visible + span { outline: 2px solid var(--accent); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips label { margin: 0; }
+.chips span { display: inline-block; padding: 5px 11px; border: 1px solid var(--line); border-radius: 99px; font-size: 13px; font-weight: 500; cursor: pointer; transition: .15s; }
+.chips input:checked + span { background: var(--warm); border-color: var(--warm); color: #fff; }
+
+.btn { border: 0; border-radius: 12px; padding: 12px 18px; background: var(--accent); color: var(--accent-ink); font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: transform .1s, opacity .15s; }
+.btn:hover { transform: translateY(-1px); }
+.btn:disabled { opacity: .55; cursor: wait; transform: none; }
+
+#out { display: grid; gap: 20px; min-width: 0; }
+.empty { padding: 48px 32px; text-align: center; }
+.empty h2 { font-size: 26px; margin: 18px 0 8px; }
+.empty p { color: var(--muted); max-width: 460px; margin: 0 auto; }
+.how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; text-align: left; }
+.how div { padding: 14px; border-radius: 14px; background: var(--bg); font-size: 13px; color: var(--muted); }
+.how b { display: block; color: var(--ink); font-size: 14px; margin-bottom: 2px; }
+@media (max-width: 600px) { .how { grid-template-columns: 1fr; } }
+
+.loading { padding: 28px; display: flex; gap: 16px; align-items: center; }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.skeleton { height: 300px; border-radius: var(--radius); background: linear-gradient(90deg, var(--panel), var(--line), var(--panel)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+.error { padding: 16px 20px; border-color: var(--fat); color: var(--fat); font-weight: 600; }
+
+.summary { padding: 24px; display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; }
+@media (max-width: 640px) { .summary { grid-template-columns: 1fr; } }
+.kcal { text-align: center; padding-right: 28px; border-right: 1px solid var(--line); }
+@media (max-width: 640px) { .kcal { border: 0; padding: 0; } }
+.kcal small { display: block; color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.kcal strong { font-family: Fraunces, serif; font-size: 52px; line-height: 1.1; display: block; }
+.kcal span { color: var(--muted); font-size: 13px; }
+.summary p { margin: 0 0 16px; }
+.macro { display: grid; grid-template-columns: 70px 1fr 110px; gap: 10px; align-items: center; font-size: 13px; margin-top: 8px; }
+.macro b { font-weight: 600; }
+.macro em { font-style: normal; color: var(--muted); text-align: right; }
+.bar { height: 8px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 99px; transition: width .6s ease; }
+
+.meals { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 18px; }
+.meal { overflow: hidden; display: flex; flex-direction: column; animation: rise .4s ease both; }
+.meal:nth-child(2) { animation-delay: .06s; } .meal:nth-child(3) { animation-delay: .12s; } .meal:nth-child(4) { animation-delay: .18s; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+.meal figure { margin: 0; position: relative; aspect-ratio: 312/231; background: var(--line); }
+.meal img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.badge { position: absolute; top: 12px; left: 12px; background: var(--panel); color: var(--ink); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; box-shadow: var(--shadow); }
+.meal .body { padding: 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.meal h3 { font-size: 17px; line-height: 1.3; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; font-weight: 600; }
+.meta span { padding: 3px 8px; border-radius: 8px; background: var(--bg); }
+.meta .k { background: var(--accent-soft); color: var(--accent); }
+.why { color: var(--muted); font-size: 13px; margin: 0; flex: 1; }
+.meal a { color: var(--accent); font-weight: 700; font-size: 13px; text-decoration: none; }
+.meal a:hover { text-decoration: underline; }
+
+.ask { padding: 14px; display: flex; gap: 10px; }
+@media (max-width: 520px) { .ask { flex-direction: column; } }
+.ask input { flex: 1; }
+
+details.panel { padding: 14px 20px; }
+summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+ol.steps { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+ol.steps code { display: block; font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" aria-hidden="true">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>
+  </div>
+  <div><h1>Nutri Agent</h1><p>Personalized meal plans, built by an AI agent</p></div>
+</header>
+
+<main>
+  <form id="profile" class="panel">
+    <h2>Your profile</h2>
+    <div>
+      <span class="label" id="sex-l">Sex</span>
+      <div class="seg" role="radiogroup" aria-labelledby="sex-l">
+        <label><input type="radio" name="sex" value="female" checked><span>Female</span></label>
+        <label><input type="radio" name="sex" value="male"><span>Male</span></label>
+      </div>
+    </div>
+    <div class="row3">
+      <div><label for="age">Age</label><input id="age" name="age" type="number" min="14" max="100" value="23" required></div>
+      <div><label for="weight">Weight (kg)</label><input id="weight" name="weight" type="number" min="30" max="300" step="0.1" value="62" required></div>
+      <div><label for="height">Height (cm)</label><input id="height" name="height" type="number" min="120" max="230" value="168" required></div>
+    </div>
+    <div>
+      <label for="activity">Activity level</label>
+      <select id="activity" name="activity">
+        <option value="sedentary">Sedentary · desk job, no exercise</option>
+        <option value="light">Light · 1-3 workouts/week</option>
+        <option value="moderate" selected>Moderate · 3-5 workouts/week</option>
+        <option value="active">Active · 6-7 workouts/week</option>
+        <option value="very_active">Very active · physical job + training</option>
+      </select>
+    </div>
+    <div>
+      <span class="label" id="goal-l">Goal</span>
+      <div class="seg" role="radiogroup" aria-labelledby="goal-l">
+        <label><input type="radio" name="goal" value="lose" checked><span>Lose</span></label>
+        <label><input type="radio" name="goal" value="maintain"><span>Maintain</span></label>
+        <label><input type="radio" name="goal" value="gain"><span>Gain</span></label>
+      </div>
+    </div>
+    <div>
+      <label for="diet">Diet</label>
+      <select id="diet" name="diet">
+        <option value="">No restrictions</option>
+        <option value="vegetarian">Vegetarian</option>
+        <option value="vegan">Vegan</option>
+        <option value="pescetarian">Pescetarian</option>
+        <option value="ketogenic">Ketogenic</option>
+        <option value="gluten free">Gluten free</option>
+        <option value="paleo">Paleo</option>
+      </select>
+    </div>
+    <div>
+      <span class="label" id="int-l">Intolerances / allergies</span>
+      <div class="chips" role="group" aria-labelledby="int-l">
+        <label><input type="checkbox" name="int" value="dairy"><span>Dairy</span></label>
+        <label><input type="checkbox" name="int" value="egg"><span>Eggs</span></label>
+        <label><input type="checkbox" name="int" value="gluten"><span>Gluten</span></label>
+        <label><input type="checkbox" name="int" value="peanut"><span>Peanuts</span></label>
+        <label><input type="checkbox" name="int" value="tree nut"><span>Tree nuts</span></label>
+        <label><input type="checkbox" name="int" value="seafood"><span>Fish</span></label>
+        <label><input type="checkbox" name="int" value="shellfish"><span>Shellfish</span></label>
+        <label><input type="checkbox" name="int" value="soy"><span>Soy</span></label>
+        <label><input type="checkbox" name="int" value="sesame"><span>Sesame</span></label>
+      </div>
+    </div>
+    <div>
+      <label for="notes">Preferences (optional)</label>
+      <textarea id="notes" name="notes" maxlength="500" placeholder="e.g. I love chicken, no mushrooms, max 30 minutes of cooking"></textarea>
+    </div>
+    <button class="btn" type="submit">Generate my plan</button>
+  </form>
+
+  <section id="out" aria-live="polite">
+    <div class="panel empty">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M3 3v5M5 3v5M4 8v13M21 3c-2 1-2 5-2 7h2v11"/></svg>
+      <h2>Tell me a bit about yourself</h2>
+      <p>The agent calculates your calorie needs, searches the Spoonacular recipe database and builds a one-day menu for you.</p>
+      <div class="how">
+        <div><b>1 · Calculate</b>your basal metabolism, calories and target macros</div>
+        <div><b>2 · Search</b>recipes for every meal that fit your diet</div>
+        <div><b>3 · Choose</b>the combination closest to your daily target</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const form = document.getElementById('profile');
+const out = document.getElementById('out');
+let history = [];
+let last; // last good result, re-shown if a follow-up fails
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const safeUrl = u => /^https?:\/\//.test(u || '') ? u : '#';
+const toolNames = { calculate_targets: 'Calculate targets', search_recipes: 'Search recipes', review_plan: 'Check plan' };
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const f = new FormData(form);
+  const ints = f.getAll('int');
+  const text = `My profile: sex=${f.get('sex')}, age=${f.get('age')}, weight=${f.get('weight')} kg, ` +
+    `height=${f.get('height')} cm, activity=${f.get('activity')}, goal=${f.get('goal')}. ` +
+    `Diet: ${f.get('diet') || 'no restrictions'}. Intolerances: ${ints.length ? ints.join(', ') : 'none'}. ` +
+    `Preferences: ${f.get('notes').trim() || 'none'}. Make me a plan for one day.`;
+  history = [];
+  send(text);
+});
+
+async function send(text) {
+  const msgs = [...history, { role: 'user', content: text }];
+  setBusy(true);
+  try {
+    const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: msgs }) });
+    if (!res.ok) throw new Error(await res.text());
+    const { plan, steps } = await res.json();
+    const memo = { message: plan.message, targets: plan.targets, meals: plan.meals.map(m => ({ meal: m.meal, recipe_id: m.recipe_id, title: m.recipe.title })) };
+    history = [...msgs, { role: 'assistant', content: JSON.stringify(memo) }];
+    last = [plan, steps];
+    render(plan, steps);
+  } catch (err) {
+    if (last) render(...last); else out.innerHTML = '';
+    out.insertAdjacentHTML('afterbegin', `<div class="panel error" role="alert">Something went wrong: ${esc(err.message)}</div>`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function setBusy(busy) {
+  document.querySelectorAll('button').forEach(b => b.disabled = busy);
+  if (!busy) return;
+  out.scrollIntoView({ behavior: 'smooth', block: 'start' }); // on mobile the results sit below the form
+  const phrases = ['Calculating your calorie needs…', 'Searching for matching recipes…', 'Balancing the meals…', 'Putting the plan together…'];
+  out.innerHTML = `<div class="panel loading"><div class="spinner"></div><div><b>The agent is working</b><div id="phrase" style="color:var(--muted)">${phrases[0]}</div></div></div><div class="skeleton"></div>`;
+  let i = 0;
+  const timer = setInterval(() => {
+    const el = document.getElementById('phrase');
+    if (!el) return clearInterval(timer);
+    el.textContent = phrases[++i % phrases.length];
+  }, 2500);
+}
+
+function render(plan, steps) {
+  const t = plan.targets;
+  const sum = k => plan.meals.reduce((s, m) => s + m.recipe[k], 0);
+  const macro = (name, key, target, color) => {
+    const got = sum(key);
+    return `<div class="macro"><b>${name}</b><div class="bar"><i style="width:${Math.min(100, got / (target || 1) * 100)}%;background:${color}"></i></div><em>${got} / ${target} g</em></div>`;
+  };
+  const meals = plan.meals.map(m => {
+    const r = m.recipe;
+    return `<article class="panel meal">
+      <figure><img src="${esc(safeUrl(r.image))}" alt="${esc(r.title)}" loading="lazy"><span class="badge">${esc(m.meal)}</span></figure>
+      <div class="body">
+        <h3>${esc(r.title)}</h3>
+        <div class="meta"><span class="k">${r.calories} kcal</span><span>P ${r.protein_g}g</span><span>C ${r.carbs_g}g</span><span>F ${r.fat_g}g</span>${r.ready_in_minutes ? `<span>${r.ready_in_minutes} min</span>` : ''}</div>
+        <p class="why">${esc(m.why)}</p>
+        <a href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener">View recipe →</a>
+      </div></article>`;
+  }).join('');
+  const stepList = steps.map(s => `<li><b>${esc(toolNames[s.tool] || s.tool)}</b><code>${esc(pretty(s.args))}</code></li>`).join('');
+
+  out.innerHTML = `
+    <div class="panel summary">
+      <div class="kcal"><small>Daily target</small><strong>${t.calories}</strong><span>kcal · plan has ${sum('calories')}</span></div>
+      <div><p>${esc(plan.message)}</p>
+        ${macro('Protein', 'protein_g', t.protein_g, 'var(--protein)')}
+        ${macro('Carbs', 'carbs_g', t.carbs_g, 'var(--carbs)')}
+        ${macro('Fat', 'fat_g', t.fat_g, 'var(--fat)')}
+      </div>
+    </div>
+    ${meals ? `<div class="meals">${meals}</div>` : '<div class="panel error">The agent found no matching recipes. Try relaxing your filters.</div>'}
+    <form class="panel ask" id="ask">
+      <label for="q" class="sr">Ask for a change</label>
+      <input id="q" placeholder="Ask for a change, e.g. “swap dinner for something with fish”" required maxlength="500">
+      <button class="btn">Send</button>
+    </form>
+    ${steps.length ? `<details class="panel"><summary>What the agent did · ${steps.length} tool calls</summary><ol class="steps">${stepList}</ol></details>` : ''}`;
+
+  document.getElementById('ask').addEventListener('submit', e => {
+    e.preventDefault();
+    send(document.getElementById('q').value.trim());
+  });
+}
+
+function pretty(args) {
+  try { return Object.entries(JSON.parse(args)).map(([k, v]) => `${k}: ${v}`).join(' · '); } catch { return args; }
+}
+</script>
+</body>
+</html>
