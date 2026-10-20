@@ -21,10 +21,11 @@ import (
 
 // The food log: the user writes what they ate in plain words, and we turn it into nutrients.
 //
-//   1. the model splits the text into foods, grams and a USDA search query   (parseMeal)
+//   1. the model splits the text into foods, grams and a USDA search query   (parsePrompt)
 //   2. the code searches USDA FoodData Central for candidates for each food    (searchUSDA)
-//   3. the model picks the right candidate from that closed list              (pickMatches)
-//   4. the code scales the USDA values (per 100 g) to the grams eaten         (analyzeMeal)
+//   3. the model picks the right candidate from that closed list              (pickPrompt)
+//   4. the code scales the USDA values (per 100 g) to the grams eaten
+// analyzeMeal runs all four steps.
 //
 // The model never writes a nutrient number: every number comes from USDA.
 
