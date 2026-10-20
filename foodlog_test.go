@@ -65,8 +65,10 @@ func TestFoodLogAPI(t *testing.T) {
 	t.Setenv("JWT_SECRET", strings.Repeat("s", 32))
 
 	usda := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("dataType") != "Survey (FNDDS)" || r.Header.Get("X-Api-Key") == "" {
-			t.Errorf("bad USDA request: %s", r.URL)
+		var q struct{ DataType []string }
+		json.NewDecoder(r.Body).Decode(&q)
+		if r.Method != "POST" || len(q.DataType) != 1 || q.DataType[0] != "Survey (FNDDS)" || r.Header.Get("X-Api-Key") == "" {
+			t.Errorf("bad USDA request: %s %+v", r.Method, q)
 		}
 		w.Write([]byte(`{"foods":[
 			{"description":"Whiskey and cola","foodNutrients":[{"nutrientNumber":"208","value":200}]},

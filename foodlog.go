@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
@@ -11,7 +12,6 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -61,7 +61,7 @@ var parseFormat = schemaFormat("meal_items", `{
 const parsePrompt = `You turn a description of what someone ate into a list of foods. The text may be in any language.
 For each food or drink give:
 - name: a short English name, e.g. "cheese pizza"
-- grams: your best estimate of the amount eaten, in grams (for drinks 1 ml = 1 g). Use typical portions when no amount is given.
+- grams: your best estimate of the TOTAL amount eaten, in grams, counting every piece ("2 boiled eggs" -> 100, "3 slices of bread" -> 90). For drinks 1 ml = 1 g. Use typical portions when no amount is given.
 - query: a search query for the USDA FNDDS database, worded the way FNDDS names foods, e.g. "pizza cheese regular crust", "soft drink cola", "apple raw", "coffee brewed", "chicken breast grilled".
 Split dishes into separate foods when people eat them as separate foods ("chicken with rice" -> chicken, rice). Ignore anything that is not food or drink.`
 
@@ -137,8 +137,10 @@ func searchUSDA(ctx context.Context, query string) ([]usdaFood, error) {
 	if cached, ok := usdaCache.Load(query); ok {
 		return cached.([]usdaFood), nil
 	}
-	v := url.Values{"query": {query}, "dataType": {"Survey (FNDDS)"}, "pageSize": {fmt.Sprint(usdaCandidates)}}
-	req, _ := http.NewRequestWithContext(ctx, "GET", usdaURL+"?"+v.Encode(), nil)
+	// POST with a JSON body: USDA's gateway randomly rejects GETs with "Survey (FNDDS)" in the URL (~1 in 3) with a 400.
+	body, _ := json.Marshal(map[string]any{"query": query, "dataType": []string{"Survey (FNDDS)"}, "pageSize": usdaCandidates})
+	req, _ := http.NewRequestWithContext(ctx, "POST", usdaURL, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Api-Key", cmp.Or(os.Getenv("USDA_API_KEY"), "DEMO_KEY")) // header, so the key never shows up in errors
 	var out struct {
 		Foods []struct {
