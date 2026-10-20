@@ -29,10 +29,37 @@ type userProfile struct {
 	Notes        string   `json:"notes"`
 }
 
+func (p userProfile) forCalc() profile {
+	return profile{p.Sex, p.Age, p.Weight, p.Height, p.Activity, p.Goal}
+}
+
 type user struct {
-	Salt    string       `json:"salt"`
-	Hash    string       `json:"hash"`
-	Profile *userProfile `json:"profile,omitempty"`
+	Salt    string                `json:"salt"`
+	Hash    string                `json:"hash"`
+	Profile *userProfile          `json:"profile,omitempty"`
+	Log     map[string][]logEntry `json:"log,omitempty"` // date "2026-10-20" -> what the user ate that day
+}
+
+// nutrientStat is one nutrient with this user's daily target; insights also fill in the measured amount.
+type nutrientStat struct {
+	nutrient
+	Target  float64 `json:"target"`
+	Amount  float64 `json:"amount"`  // insights: average per logged day
+	Percent int     `json:"percent"` // insights: Amount as % of Target
+}
+
+// account is what the browser gets about the logged-in user: the profile plus the targets computed from it.
+func account(username string, p *userProfile) map[string]any {
+	out := map[string]any{"username": username, "profile": p}
+	if p != nil {
+		out["targets"], _ = calcTargets(p.forCalc()) // the profile was validated when it was saved
+		var daily []nutrientStat
+		for _, n := range nutrients {
+			daily = append(daily, nutrientStat{nutrient: n, Target: dailyTarget(n.Key, *p)})
+		}
+		out["nutrients"] = daily
+	}
+	return out
 }
 
 var usersFile = "data/users.json"
@@ -125,7 +152,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	startSession(w, c.Username)
-	writeJSON(w, map[string]any{"username": c.Username, "profile": nil})
+	writeJSON(w, account(c.Username, nil))
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +171,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	p := u.Profile
 	mu.Unlock()
-	writeJSON(w, map[string]any{"username": c.Username, "profile": p})
+	writeJSON(w, account(c.Username, p))
 }
 
 func passwordMatches(u *user, password string) bool {
@@ -162,14 +189,18 @@ func handleMe(w http.ResponseWriter, r *http.Request, username string) {
 	mu.Lock()
 	p := users[username].Profile
 	mu.Unlock()
-	writeJSON(w, map[string]any{"username": username, "profile": p})
+	writeJSON(w, account(username, p))
 }
 
 func handleSaveProfile(w http.ResponseWriter, r *http.Request, username string) {
 	var p userProfile
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || len(p.Notes) > 500 || len(p.Intolerances) > 20 {
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || len(p.Notes) > 500 || len(p.Intolerances) > 20 || len(p.Diet) > 30 {
 		http.Error(w, "invalid profile", http.StatusBadRequest)
+		return
+	}
+	if _, err := calcTargets(p.forCalc()); err != nil { // same checks the calorie formula needs
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	mu.Lock()
@@ -184,7 +215,7 @@ func handleSaveProfile(w http.ResponseWriter, r *http.Request, username string) 
 		http.Error(w, "could not save the profile", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, p)
+	writeJSON(w, account(username, &p))
 }
 
 // startSession gives the browser a signed JWT in an HttpOnly cookie, which page JavaScript cannot read.

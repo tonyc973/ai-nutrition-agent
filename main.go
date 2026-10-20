@@ -30,6 +30,9 @@ func main() {
 	if len(os.Getenv("JWT_SECRET")) < 32 {
 		log.Fatal("JWT_SECRET must be at least 32 characters (generate one with: openssl rand -hex 32)")
 	}
+	if os.Getenv("USDA_API_KEY") == "" {
+		log.Println("warning: USDA_API_KEY is not set, using DEMO_KEY (a few food lookups per hour); get a free key at https://fdc.nal.usda.gov/api-key-signup")
+	}
 	if err := loadUsers(); err != nil {
 		log.Fatalf("reading %s: %v", usersFile, err)
 	}
@@ -48,6 +51,12 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/me", requireUser(handleMe))
 	mux.HandleFunc("PUT /api/profile", requireUser(handleSaveProfile))
 	mux.HandleFunc("POST /api/chat", requireUser(handleChat)) // logged-in only, so strangers can't spend the API keys
+	mux.HandleFunc("GET /api/log", requireUser(handleGetLog))
+	mux.HandleFunc("POST /api/log", requireUser(handleAddLog))
+	mux.HandleFunc("DELETE /api/log/{date}/{id}", requireUser(handleDeleteLog))
+	mux.HandleFunc("GET /api/insights", requireUser(handleInsights))
+	mux.HandleFunc("GET /api/insights/advice", requireUser(handleAdvice))
+	mux.HandleFunc("GET /api/recipes", requireUser(handleGapRecipes))
 	return mux
 }
 

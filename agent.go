@@ -38,12 +38,7 @@ How you work:
 For change requests, keep the rest of the plan and change only what the user asks for.`
 
 // The final answer must match this schema, so the UI always gets the same shape.
-var planFormat = json.RawMessage(`{
-  "type": "json_schema",
-  "json_schema": {
-    "name": "meal_plan",
-    "strict": true,
-    "schema": {
+var planFormat = schemaFormat("meal_plan", `{
       "type": "object",
       "additionalProperties": false,
       "required": ["message", "targets", "meals"],
@@ -74,8 +69,6 @@ var planFormat = json.RawMessage(`{
           }
         }
       }
-    }
-  }
 }`)
 
 type plan struct {
@@ -121,7 +114,12 @@ func runAgent(ctx context.Context, history []message) (*plan, []step, error) {
 	for i := range maxSteps {
 		// Out of searches or steps: force a final answer instead of letting the model keep calling tools.
 		mustAnswer := searches >= maxSearches || i == maxSteps-1
-		content, calls, err := callOpenAI(ctx, msgs, mustAnswer)
+		content, calls, err := callOpenAI(ctx, map[string]any{
+			"messages":        msgs,
+			"tools":           toolDefs,
+			"tool_choice":     map[bool]string{true: "none", false: "auto"}[mustAnswer],
+			"response_format": planFormat,
+		})
 		if err != nil {
 			return nil, steps, err
 		}
@@ -185,17 +183,33 @@ func reviewPlan(p *plan) string {
 	return ""
 }
 
-func callOpenAI(ctx context.Context, msgs []any, mustAnswer bool) (string, []toolCall, error) {
-	body, _ := json.Marshal(map[string]any{
-		"model":           cmp.Or(os.Getenv("OPENAI_MODEL"), "gpt-4o-mini"),
-		"messages":        msgs,
-		"tools":           toolDefs,
-		"tool_choice":     map[bool]string{true: "none", false: "auto"}[mustAnswer],
-		"response_format": planFormat,
+// schemaFormat wraps a JSON schema as an OpenAI "structured output": the answer is guaranteed to match it.
+func schemaFormat(name, schema string) json.RawMessage {
+	return json.RawMessage(`{"type": "json_schema", "json_schema": {"name": "` + name + `", "strict": true, "schema": ` + schema + `}}`)
+}
+
+// askJSON is a single model call (no tools) whose answer must match format; it is decoded into out.
+func askJSON(ctx context.Context, system, user string, format json.RawMessage, out any) error {
+	content, _, err := callOpenAI(ctx, map[string]any{
+		"messages":        []message{{"system", system}, {"user", user}},
+		"response_format": format,
 	})
-	req, _ := http.NewRequestWithContext(ctx, "POST", openaiURL, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
-	req.Header.Set("Content-Type", "application/json")
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(content), out); err != nil {
+		return fmt.Errorf("invalid answer from the model: %w", err)
+	}
+	return nil
+}
+
+// callOpenAI sends one Chat Completions request; req holds messages and optional tools/response_format.
+func callOpenAI(ctx context.Context, req map[string]any) (string, []toolCall, error) {
+	req["model"] = cmp.Or(os.Getenv("OPENAI_MODEL"), "gpt-4o-mini")
+	body, _ := json.Marshal(req)
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", openaiURL, bytes.NewReader(body))
+	httpReq.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+	httpReq.Header.Set("Content-Type", "application/json")
 	var out struct {
 		Choices []struct {
 			Message struct {
@@ -205,7 +219,7 @@ func callOpenAI(ctx context.Context, msgs []any, mustAnswer bool) (string, []too
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if err := doJSON(req, &out); err != nil {
+	if err := doJSON(httpReq, &out); err != nil {
 		return "", nil, err
 	}
 	if len(out.Choices) == 0 {
@@ -218,6 +232,20 @@ func callOpenAI(ctx context.Context, msgs []any, mustAnswer bool) (string, []too
 	return m.Content, m.ToolCalls, nil
 }
 
+// statusError is a non-200 answer from an external API, so callers can react to the status code.
+type statusError struct {
+	Status int
+	msg    string
+}
+
+func (e *statusError) Error() string { return e.msg }
+
+// isStatus reports whether err is an external API answer with this HTTP status.
+func isStatus(err error, status int) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.Status == status
+}
+
 func doJSON(req *http.Request, out any) error {
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -226,7 +254,7 @@ func doJSON(req *http.Request, out any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
-		return fmt.Errorf("%s answered %s: %s", req.URL.Host, resp.Status, b)
+		return &statusError{resp.StatusCode, fmt.Sprintf("%s answered %s: %s", req.URL.Host, resp.Status, b)}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

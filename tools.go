@@ -133,6 +133,8 @@ type searchQuery struct {
 	MaxCalories        float64 `json:"max_calories"`
 	MinProtein         float64 `json:"min_protein"`
 	Number             int     `json:"number"`
+
+	extra url.Values // extra Spoonacular filters set by our own code, e.g. minVitaminC (the model can't set these)
 }
 
 type recipe struct {
@@ -145,6 +147,8 @@ type recipe struct {
 	ProteinG       int    `json:"protein_g"`
 	CarbsG         int    `json:"carbs_g"`
 	FatG           int    `json:"fat_g"`
+
+	nutrients map[string]float64 // every nutrient Spoonacular reports, per serving (not sent to the model)
 }
 
 // shortcut: both in-memory caches grow with every search and resets on restart; fine for a demo, use a DB for real users.
@@ -166,6 +170,9 @@ func searchRecipes(ctx context.Context, q searchQuery) ([]recipe, error) {
 	}
 	if q.MinProtein > 0 {
 		v.Set("minProtein", strconv.Itoa(int(q.MinProtein)))
+	}
+	for k, vs := range q.extra {
+		v[k] = vs
 	}
 	u := spoonURL + "?" + v.Encode()
 	if cached, ok := searchCache.Load(u); ok {
@@ -190,16 +197,20 @@ func searchRecipes(ctx context.Context, q searchQuery) ([]recipe, error) {
 		} `json:"results"`
 	}
 	if err := doJSON(req, &out); err != nil {
+		if isStatus(err, http.StatusPaymentRequired) {
+			return nil, errors.New("the daily Spoonacular recipe quota is used up; it resets tomorrow")
+		}
 		return nil, err
 	}
 	recipes := []recipe{}
 	for _, r := range out.Results {
-		n := map[string]int{}
+		n := map[string]float64{}
 		for _, x := range r.Nutrition.Nutrients {
-			n[x.Name] = int(math.Round(x.Amount))
+			n[x.Name] = x.Amount
 		}
+		whole := func(name string) int { return int(math.Round(n[name])) }
 		rec := recipe{r.ID, r.Title, r.Image, cmp.Or(r.SourceURL, r.SpoonacularSourceURL), r.ReadyInMinutes,
-			n["Calories"], n["Protein"], n["Carbohydrates"], n["Fat"]}
+			whole("Calories"), whole("Protein"), whole("Carbohydrates"), whole("Fat"), n}
 		recipeCache.Store(rec.ID, rec)
 		recipes = append(recipes, rec)
 	}

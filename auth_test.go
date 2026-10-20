@@ -41,8 +41,11 @@ func TestAuthFlow(t *testing.T) {
 	if got := call("POST", "/api/register", `{"username":"ana","password":"other1234"}`); got != 409 {
 		t.Fatalf("duplicate register: %d", got)
 	}
-	if got := call("PUT", "/api/profile", `{"sex":"female","age":23,"weight":62,"height":168,"intolerances":["dairy"]}`); got != 200 {
+	if got := call("PUT", "/api/profile", `{"sex":"female","age":23,"weight":62,"height":168,"activity":"moderate","goal":"lose","intolerances":["dairy"]}`); got != 200 {
 		t.Fatalf("save profile: %d", got)
+	}
+	if got := call("PUT", "/api/profile", `{"sex":"female","age":23,"weight":8,"height":168,"activity":"moderate","goal":"lose"}`); got != 400 {
+		t.Fatalf("unrealistic profile must be rejected: %d", got)
 	}
 	if got := call("POST", "/api/logout", ""); got != 204 {
 		t.Fatalf("logout: %d", got)
